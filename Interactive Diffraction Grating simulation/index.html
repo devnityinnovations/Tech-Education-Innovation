@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Diffraction Grating Simulation</title>
+<style>
+  :root {
+    --bg-color: #f5f5f5;
+    --wall-color: #888;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html, body { height: 100%; }
+
+  body {
+    background: var(--bg-color);
+    margin: 0;
+    font-family: "Segoe UI", sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    overflow-x: hidden;
+  }
+
+  h1 {
+    margin: 15px 0;
+    font-weight: 500;
+    text-align: center;
+    width: 100%;
+  }
+
+  .container {
+    width: min(95%, 1920px);
+    max-width: 1920px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin: 0 auto;
+    gap: 12px;
+  }
+
+  .canvas-wrap { width: 100%; max-width: 100%; }
+
+  canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+    background: #efefef;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    max-height: 80vh;
+  }
+
+  .controls {
+    margin-top: 10px;
+    width: 100%;
+    max-width: 900px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .label {
+    font-size: 1rem;
+    margin-bottom: 4px;
+    display: block;
+    text-align: center;
+  }
+
+  input[type="range"] {
+    width: 90%;
+    max-width: 800px;
+    height: 8px;
+    border-radius: 4px;
+    background: linear-gradient(to right, violet, blue, cyan, green, yellow, orange, red);
+    outline: none;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #fff;
+    border: 2px solid #888;
+    cursor: pointer;
+  }
+
+  .info {
+    text-align: center;
+    width: 100%;
+    max-width: 1100px;
+    line-height: 1.45;
+  }
+
+  @media (max-width: 900px) {
+    h1 { font-size: 1.25rem; }
+    .label { font-size: 0.95rem; }
+    .controls { max-width: 100%; }
+    canvas { max-height: 60vh; }
+  }
+
+  @media (max-width: 600px) {
+    h1 { font-size: 1.1rem; }
+    .label { font-size: 0.9rem; }
+    input[type="range"] { width: 95%; }
+    .info { padding: 0 8px; }
+  }
+</style>
+</head>
+<body>
+<h1>Diffraction Grating</h1>
+<div class="container">
+  <div class="canvas-wrap">
+    <canvas id="canvas" width="900" height="400"></canvas>
+  </div>
+  <div class="controls">
+    <span class="label">wavelength = <span id="lambdaValue">600</span> nm</span>
+    <input type="range" id="lambda" min="400" max="700" value="600" />
+  </div>
+  <div class="info">
+    <p>
+      The diffraction grating is a transparent plate with very narrow lines on the surface.
+    </p>
+    <p>
+      Light (photons) like to go in the same phase. In the same phase, constructive 
+      interference occurs. If the phases are different, the waves cancel each other out.
+    </p>
+    <p>
+      The light that passes through the hole in the diffraction grating has the opportunity 
+      to spread in many ways, but it tries to match the phases of the waves because they want 
+      all the lights to go to the same state. Therefore, the light passing through the holes travels only at a certain angle, depending on the wavelength.
+    </p>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const lambdaSlider = document.getElementById('lambda');
+const lambdaValue = document.getElementById('lambdaValue');
+
+let wavelength = 600;
+let phase = 0;
+
+function resizeCanvas() {
+  const ratio = window.devicePixelRatio || 1;
+  const displayWidth = canvas.clientWidth;
+  const displayHeight = canvas.clientHeight;
+
+  canvas.width = displayWidth * ratio;
+  canvas.height = displayHeight * ratio;
+
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.scale(ratio, ratio);
+}
+
+function wavelengthToRGB(lambda) {
+  let R=0,G=0,B=0;
+  if (lambda >= 380 && lambda < 440) { R=-(lambda-440)/(440-380); G=0; B=1; }
+  else if (lambda >= 440 && lambda < 490) { R=0; G=(lambda-440)/(490-440); B=1; }
+  else if (lambda >= 490 && lambda < 510) { R=0; G=1; B=-(lambda-510)/(510-490); }
+  else if (lambda >= 510 && lambda < 580) { R=(lambda-510)/(580-510); G=1; B=0; }
+  else if (lambda >= 580 && lambda < 645) { R=1; G=-(lambda-645)/(645-580); B=0; }
+  else if (lambda >= 645 && lambda <= 780) { R=1; G=0; B=0; }
+  return `rgb(${Math.round(R*255)},${Math.round(G*255)},${Math.round(B*255)})`;
+}
+
+function draw() {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  const color = wavelengthToRGB(wavelength);
+  const totalWaves = 7;
+  const alignedCount = 5; // first 5 waves aligned
+  const remaining = totalWaves - alignedCount; // last 2 waves
+  const amplitude = 7;
+  const k = (2*Math.PI)/(wavelength/20);
+  const wallX = canvas.clientWidth*0.55;
+
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = color;
+
+  const spacing = canvas.clientHeight / (totalWaves + 1);
+
+  // --- FIRST 5 waves pre-plate ---
+  for (let i = 0; i < alignedCount; i++) {
+    const centerY = spacing * (i + 1);
+    ctx.beginPath();
+    for (let x = 0; x < wallX; x++) {
+      const y = centerY + amplitude * Math.sin(k*x - phase);
+      x === 0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+  }
+
+  // --- LAST 2 waves pre-plate (unchanged) ---
+  for (let i = 0; i < remaining; i++) {
+    const idx = i + alignedCount;
+    const centerY = spacing * (idx + 1);
+    ctx.beginPath();
+    for (let x = 0; x < wallX; x++) {
+      const y = centerY + amplitude * Math.sin(k*x - phase);
+      x === 0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+  }
+
+  // Draw plate
+  const wallWidth = 50;
+  ctx.fillStyle = '#888';
+  ctx.beginPath();
+  ctx.moveTo(wallX, 40);
+  ctx.lineTo(wallX + wallWidth, 20);
+  ctx.lineTo(wallX + wallWidth, canvas.clientHeight - 20);
+  ctx.lineTo(wallX, canvas.clientHeight - 40);
+  ctx.closePath();
+  ctx.fill();
+
+  // Draw slits (aligned with first 5 waves)
+  ctx.fillStyle = '#efefef';
+  const slitHeight = 25;
+  for (let s = 0; s < alignedCount; s++) {
+    const y = spacing * (s + 1) - slitHeight/2;
+    ctx.fillRect(wallX, y, wallWidth, slitHeight);
+  }
+
+  // --- FIRST 5 waves post-plate (aligned) ---
+  ctx.strokeStyle = color;
+  for (let i = 0; i < alignedCount; i++) {
+    const centerY = spacing * (i + 1);
+    ctx.beginPath();
+    for (let x = wallX + wallWidth; x < canvas.clientWidth; x++) {
+      const offset = (i - (alignedCount-1)/2) * 0.15;
+      const y = centerY + amplitude * Math.sin(k*(x - wallX) - phase + offset);
+      x === wallX + wallWidth ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+  }
+
+  // --- LAST 2 waves post-plate (unchanged) ---
+  for (let i = 0; i < remaining; i++) {
+  const idx = i + alignedCount;
+  const centerY = spacing * (idx + 1);
+  ctx.beginPath();
+  for (let x = wallX + wallWidth; x < canvas.clientWidth; x++) {
+    // last 2 waves plate ke baad nahi jaayengi
+    const y = centerY + amplitude * Math.sin(k*(x - wallX) - phase);
+    if (x > wallX + wallWidth) break; // yahi ruk jaayegi
+    x === wallX + wallWidth ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+}
+
+  phase += 0.08;
+  requestAnimationFrame(draw);
+}
+
+lambdaSlider.oninput = () => {
+  wavelength = parseFloat(lambdaSlider.value);
+  lambdaValue.textContent = wavelength;
+  resizeCanvas();
+};
+
+window.addEventListener("resize", () => {
+  resizeCanvas();
+});
+
+resizeCanvas();
+draw();
+</script>
+</body>
+</html>
+
+
+
+
+
+<!-- <!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Diffraction Grating Simulation</title>
+<style>
+  :root {
+    --bg-color: #f5f5f5;
+    --wall-color: #888;
+  }
+
+  /* box-sizing for predictable sizing */
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+  }
+
+  body {
+    background: var(--bg-color);
+    margin: 0;
+    font-family: "Segoe UI", sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    overflow-x: hidden;
+  }
+
+  h1 {
+    margin: 15px 0;
+    font-weight: 500;
+    text-align: center;
+    width: 100%;
+  }
+
+  /* Responsive container with max width 1920px and centered content */
+  .container {
+    width: min(95%, 1920px);
+    max-width: 1920px; /* requested max width */
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin: 0 auto; /* center horizontally */
+    gap: 12px;
+  }
+
+  /* Make canvas responsive while keeping its drawing resolution intact */
+  .canvas-wrap {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  canvas {
+    display: block;
+    width: 100%;      /* responsive width */
+    height: auto;     /* preserve aspect ratio */
+    background: #efefef;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    max-height: 80vh; /* avoid overflowing very tall canvases on small viewports */
+  }
+
+  .controls {
+    margin-top: 10px;
+    width: 100%;
+    max-width: 900px; /* keeps controls readable on very large screens */
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .label {
+    font-size: 1rem;
+    margin-bottom: 4px;
+    display: block;
+    text-align: center;
+  }
+
+  input[type="range"] {
+    width: 90%;
+    max-width: 800px;
+    height: 8px;
+    border-radius: 4px;
+    background: linear-gradient(to right, violet, blue, cyan, green, yellow, orange, red);
+    outline: none;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #fff;
+    border: 2px solid #888;
+    cursor: pointer;
+  }
+
+  /* Content always center-aligned as requested */
+  .info {
+    text-align: center;
+    width: 100%;
+    max-width: 1100px;
+    line-height: 1.45;
+  }
+
+  /* Smaller devices */
+  @media (max-width: 900px) {
+    h1 { font-size: 1.25rem; }
+    .label { font-size: 0.95rem; }
+    .controls { max-width: 100%; }
+    canvas { max-height: 60vh; }
+  }
+
+  @media (max-width: 600px) {
+    h1 { font-size: 1.1rem; }
+    .label { font-size: 0.9rem; }
+    input[type="range"] { width: 95%; }
+    .info { padding: 0 8px; }
+  }
+</style>
+</head>
+<body>
+  <h1>Diffraction Grating</h1>
+  <div class="container">
+    <div class="canvas-wrap">
+      <canvas id="canvas" width="900" height="400"></canvas>
+    </div>
+    <div class="controls">
+      <span class="label">wavelength = <span id="lambdaValue">600</span> nm</span>
+      <input type="range" id="lambda" min="400" max="700" value="600" />
+    </div>
+    <div class="info">
+    <p>
+     The diffraction grating is a transparent plate with very narrow lines on the surface.
+    </p>
+    <p>
+      Light (photons) like to go in the same phase. In the same phase, constructive 
+      interference occurs. If the phases are different, the waves cancel each other out.
+    </p>
+    <p>
+      The light that passes through the hole in the diffraction grating has the opportunity 
+      to spread in many ways, but it tries to match the phases of the waves because they want 
+      all the lights to go to the same state. Therefore, the light passing through the holes travels only at a certain angle, depending on the wavelength.
+    </p>
+  </div>
+  </div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const lambdaSlider = document.getElementById('lambda');
+const lambdaValue = document.getElementById('lambdaValue');
+
+let wavelength = 600;
+let phase = 0;
+
+// Responsive High-DPI canvas setup
+function resizeCanvas() {
+  const ratio = window.devicePixelRatio || 1;
+  const displayWidth = canvas.clientWidth;
+  const displayHeight = canvas.clientHeight;
+
+  canvas.width = displayWidth * ratio;
+  canvas.height = displayHeight * ratio;
+
+  ctx.scale(ratio, ratio);
+}
+
+// wavelength to color converter
+function wavelengthToRGB(lambda) {
+  let R=0,G=0,B=0;
+  if (lambda >= 380 && lambda < 440) { R=-(lambda-440)/(440-380); G=0; B=1; }
+  else if (lambda >= 440 && lambda < 490) { R=0; G=(lambda-440)/(490-440); B=1; }
+  else if (lambda >= 490 && lambda < 510) { R=0; G=1; B=-(lambda-510)/(510-490); }
+  else if (lambda >= 510 && lambda < 580) { R=(lambda-510)/(580-510); G=1; B=0; }
+  else if (lambda >= 580 && lambda < 645) { R=1; G=-(lambda-645)/(645-580); B=0; }
+  else if (lambda >= 645 && lambda <= 780) { R=1; G=0; B=0; }
+  return `rgb(${Math.round(R*255)},${Math.round(G*255)},${Math.round(B*255)})`;
+}
+
+function draw() {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  const color = wavelengthToRGB(wavelength);
+  const numWaves = 7;
+  const spacing = canvas.clientHeight / (numWaves + 1);
+  const amplitude = 5;
+  const k = (2*Math.PI)/(wavelength/20);
+
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = color;
+
+  for (let i=0; i<numWaves; i++) {
+    ctx.beginPath();
+    for (let x=0; x<canvas.clientWidth*0.55; x++) {
+      const y = spacing*(i+1) + amplitude*Math.sin(k*x - phase);
+      x===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+  }
+
+  const wallX = canvas.clientWidth*0.55;
+  const wallWidth = 50;
+  ctx.fillStyle = '#888';
+  ctx.beginPath();
+  ctx.moveTo(wallX, 40);
+  ctx.lineTo(wallX+wallWidth, 20);
+  ctx.lineTo(wallX+wallWidth, canvas.clientHeight-20);
+  ctx.lineTo(wallX, canvas.clientHeight-40);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = '#efefef';
+  const slitCount = 5;
+  const slitHeight = 25;
+  for (let s=0; s<slitCount; s++) {
+    const y = spacing*(s+1) - slitHeight/2;
+    ctx.fillRect(wallX, y, wallWidth, slitHeight);
+  }
+
+  ctx.strokeStyle = color;
+  for (let i=0; i<slitCount; i++) {
+    ctx.beginPath();
+    for (let x=wallX+wallWidth; x<canvas.clientWidth; x++) {
+      const offset = (i - slitCount/2)*0.15;
+      const y = spacing*(i+1.2) + amplitude*Math.sin(k*(x-wallX) - phase + offset);
+      x===wallX+wallWidth ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+  }
+
+  phase += 0.08;
+  requestAnimationFrame(draw);
+}
+
+lambdaSlider.oninput = () => {
+  wavelength = parseFloat(lambdaSlider.value);
+  lambdaValue.textContent = wavelength;
+  resizeCanvas();
+};
+
+window.addEventListener("resize", () => {
+  resizeCanvas();
+});
+
+resizeCanvas();
+draw();
+
+</script>
+</body>
+</html> -->
+
+
+
+<!-- <!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Diffraction Grating Simulation</title>
+<style>
+  :root {
+    --bg-color: #f5f5f5;
+    --wall-color: #888;
+  }
+
+  body {
+    background: var(--bg-color);
+    margin: 0;
+    font-family: "Segoe UI", sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    overflow-x: hidden;
+  }
+
+  h1 {
+    margin: 15px 0;
+    font-weight: 500;
+  }
+
+  .container {
+    width: 95%;
+    max-width: 1000px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  canvas {
+    width: 100%;
+    height: auto;
+    background: #efefef;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+  }
+
+  .controls {
+    margin-top: 10px;
+    width: 100%;
+    max-width: 600px;
+    text-align: center;
+  }
+
+  .label {
+    font-size: 1rem;
+    margin-bottom: 4px;
+    display: block;
+  }
+
+  input[type="range"] {
+    width: 80%;
+    height: 8px;
+    border-radius: 4px;
+    background: linear-gradient(to right, violet, blue, cyan, green, yellow, orange, red);
+    outline: none;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #fff;
+    border: 2px solid #888;
+    cursor: pointer;
+  }
+
+  .info {
+    text-align: justify;
+  }
+
+  @media (max-width: 600px) {
+    h1 { font-size: 1.2rem; }
+    .label { font-size: 0.9rem; }
+  }
+</style>
+</head>
+<body>
+  <h1>Diffraction Grating</h1>
+  <div class="container">
+    <canvas id="canvas" width="900" height="400"></canvas>
+    <div class="controls">
+      <span class="label">wavelength = <span id="lambdaValue">600</span> nm</span>
+      <input type="range" id="lambda" min="400" max="700" value="600" />
+    </div>
+    <div class="info">
+    <p>
+     The diffraction grating is a transparent plate with very narrow lines on the surface.
+    </p>
+    <p>
+      Light (photons) like to go in the same phase. In the same phase, constructive 
+      interference occurs. If the phases are different, the waves cancel each other out.
+    </p>
+    <p>
+      The light that passes through the hole in the diffraction grating has the opportunity 
+      to spread in many ways, but it tries to match the phases of the waves because they want 
+      all the lights to go to the same state. Therefore, the light passing through the holes travels only at a certain angle, depending on the wavelength.
+    </p>
+  </div>
+  </div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const lambdaSlider = document.getElementById('lambda');
+const lambdaValue = document.getElementById('lambdaValue');
+
+let wavelength = 600;
+let phase = 0;
+
+// wavelength to color converter
+function wavelengthToRGB(lambda) {
+  let R=0,G=0,B=0;
+  if (lambda >= 380 && lambda < 440) { R=-(lambda-440)/(440-380); G=0; B=1; }
+  else if (lambda >= 440 && lambda < 490) { R=0; G=(lambda-440)/(490-440); B=1; }
+  else if (lambda >= 490 && lambda < 510) { R=0; G=1; B=-(lambda-510)/(510-490); }
+  else if (lambda >= 510 && lambda < 580) { R=(lambda-510)/(580-510); G=1; B=0; }
+  else if (lambda >= 580 && lambda < 645) { R=1; G=-(lambda-645)/(645-580); B=0; }
+  else if (lambda >= 645 && lambda <= 780) { R=1; G=0; B=0; }
+  return `rgb(${Math.round(R*255)},${Math.round(G*255)},${Math.round(B*255)})`;
+}
+
+function draw() {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  const color = wavelengthToRGB(wavelength);
+  const numWaves = 7;
+  const spacing = canvas.height / (numWaves + 1);
+
+  // ⚙️ Adjusted wave amplitude and frequency for tighter curves
+  const amplitude = 5;  // smaller waves (was 12)
+  const k = (2*Math.PI)/(wavelength/20); // tighter wavelength spacing (was /2.3)
+
+  // left side waves
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = color;
+  for (let i=0; i<numWaves; i++) {
+    ctx.beginPath();
+    for (let x=0; x<canvas.width*0.55; x++) {
+      const y = spacing*(i+1) + amplitude*Math.sin(k*x - phase);
+      if (x===0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  // gray diffraction grating wall
+  const wallX = canvas.width*0.55;
+  const wallWidth = 50;
+  ctx.fillStyle = '#888';
+  ctx.beginPath();
+  ctx.moveTo(wallX, 40);
+  ctx.lineTo(wallX+wallWidth, 20);
+  ctx.lineTo(wallX+wallWidth, canvas.height-20);
+  ctx.lineTo(wallX, canvas.height-40);
+  ctx.closePath();
+  ctx.fill();
+
+  // slits
+  ctx.fillStyle = '#efefef';
+  const slitCount = 5;
+  const slitHeight = 25;
+  for (let s=0; s<slitCount; s++) {
+    const y = spacing*(s+1) - slitHeight/2;
+    ctx.fillRect(wallX, y, wallWidth, slitHeight);
+  }
+
+  // right side diffracted waves
+  ctx.strokeStyle = color;
+  for (let i=0; i<slitCount; i++) {
+    ctx.beginPath();
+    for (let x=wallX+wallWidth; x<canvas.width; x++) {
+      const offset = (i - slitCount/2)*0.15;
+      const y = spacing*(i+1.2) + amplitude*Math.sin(k*(x-wallX) - phase + offset);
+      if (x===wallX+wallWidth) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  phase += 0.08;
+  requestAnimationFrame(draw);
+}
+
+lambdaSlider.oninput = function() {
+  wavelength = parseFloat(this.value);
+  lambdaValue.textContent = wavelength;
+};
+
+draw();
+</script>
+</body>
+</html> -->
+
+
+
+
+
+
+
+
