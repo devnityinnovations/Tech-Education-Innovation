@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Newton's Rings — Animated Waves Simulation</title>
+  <style>
+    :root{--bg:#071225;--panel:#0f1724;--accent:#7dd3fc;--muted:#94a3b8}
+    body{margin:0;font-family:Inter, system-ui, -apple-system, 'Segoe UI', Roboto, Arial;background:var(--bg);color:#e6eef8}
+    .wrap{display:flex;gap:18px;padding:18px;height:100vh;box-sizing:border-box}
+    .left{flex:1;display:flex;align-items:center;justify-content:center}
+    canvas{background:radial-gradient(circle at 50% 50%, #071022 0%, #030613 80%);border-radius:8px;box-shadow:0 12px 30px rgba(2,6,23,0.7)}
+    .panel{width:320px;background:linear-gradient(180deg,var(--panel),#071426);padding:16px;border-radius:10px;box-shadow:0 8px 20px rgba(2,6,23,0.6)}
+    label{font-size:13px;color:var(--muted);display:block;margin-bottom:6px}
+    .row{margin-bottom:12px}
+    input[type=range]{width:100%}
+    .value{font-weight:600;color:#fff;margin-left:8px}
+    button{background:transparent;border:1px solid rgba(125,211,252,0.12);color:var(--accent);padding:8px 10px;border-radius:8px;cursor:pointer}
+    small{display:block;color:var(--muted);margin-top:6px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="left">
+      <canvas id="c" width="720" height="720"></canvas>
+    </div>
+
+    <div class="panel">
+      <h3 style="margin:0 0 10px 0">Newton's Rings — Animated</h3>
+      <div class="row">
+        <label>Wavelength (nm) <span id="wlTxt">550</span> nm</label>
+        <input id="wl" type="range" min="380" max="780" value="550">
+      </div>
+      <div class="row">
+        <label>Radius of curvature R (mm) <span id="rTxt">20</span> mm</label>
+        <input id="R" type="range" min="1" max="200" value="20">
+      </div>
+      <div class="row">
+        <label>Animation speed <span id="spdTxt">1.0</span>x</label>
+        <input id="speed" type="range" min="0" max="3" step="0.05" value="1">
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button id="pause">Pause</button>
+        <button id="download">Download PNG</button>
+      </div>
+      <hr style="margin:12px 0;border:none;border-top:1px solid rgba(255,255,255,0.04)">
+      <small>Rendering method: per-pixel interference approximation. Bright/dark rings come from cosine of phase term; animation is phase-shifted in time to show moving wave effect.</small>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('c');
+    const ctx = canvas.getContext('2d');
+    const wlCtrl = document.getElementById('wl');
+    const wlTxt = document.getElementById('wlTxt');
+    const Rctrl = document.getElementById('R');
+    const rTxt = document.getElementById('rTxt');
+    const speedCtrl = document.getElementById('speed');
+    const spdTxt = document.getElementById('spdTxt');
+    const pauseBtn = document.getElementById('pause');
+    const downloadBtn = document.getElementById('download');
+
+    // device pixel handling
+    function resize(){
+      const dpr = window.devicePixelRatio || 1;
+      const size = Math.min(window.innerHeight - 60, 720);
+      canvas.style.width = size + 'px';
+      canvas.style.height = size + 'px';
+      canvas.width = Math.round(size * dpr);
+      canvas.height = Math.round(size * dpr);
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // wavelength to RGB (simple mapping)
+    function wavelengthToRGB(nm){
+      const lambda = nm;
+      let R=0,G=0,B=0;
+      if(lambda>=380 && lambda<440){R=-(lambda-440)/(440-380);G=0;B=1}
+      else if(lambda>=440 && lambda<490){R=0;G=(lambda-440)/(490-440);B=1}
+      else if(lambda>=490 && lambda<510){R=0;G=1;B=-(lambda-510)/(510-490)}
+      else if(lambda>=510 && lambda<580){R=(lambda-510)/(580-510);G=1;B=0}
+      else if(lambda>=580 && lambda<645){R=1;G=-(lambda-645)/(645-580);B=0}
+      else if(lambda>=645 && lambda<=780){R=1;G=0;B=0}
+      let factor=1;
+      if(lambda>=380 && lambda<420) factor=0.3+0.7*(lambda-380)/(420-380);
+      if(lambda>700 && lambda<=780) factor=0.3+0.7*(780-lambda)/(780-700);
+      const gamma=0.8;
+      const conv = c => Math.round(255*Math.pow(c*factor,gamma));
+      return [conv(R),conv(G),conv(B)];
+    }
+
+    // main render loop: per-pixel compute intensity
+    let t0 = performance.now();
+    let paused = false;
+
+    function render(){
+      const now = performance.now();
+      const dt = (now - t0) / 1000; // seconds since start
+      const speed = Number(speedCtrl.value);
+      const phaseTime = dt * speed; // scale time
+
+      const wl_nm = Number(wlCtrl.value);
+      const wl_m = wl_nm * 1e-9;
+      const R_mm = Number(Rctrl.value);
+      const R_m = R_mm / 1000; // convert mm to meters
+
+      const baseColor = wavelengthToRGB(wl_nm);
+
+      const w = canvas.width;
+      const h = canvas.height;
+      const image = ctx.createImageData(Math.floor(w), Math.floor(h));
+      const data = image.data;
+
+      // center in pixel coords (note canvas scaled by DPR already)
+      const cx = w/2;
+      const cy = h/2;
+
+      // mapping: choose magnification so ring sizes fit nicely
+      // We'll compute r_m = sqrt(m * lambda * R). Instead of m, compute continuous m ~ r^2/(lambda*R)
+      // So phase ~ 2π * m = 2π * r^2/(lambda*R). Add -omega*t for animation
+
+      // precompute factor
+      const factor = 1 / (wl_m * R_m); // units 1/m^2
+      // animation angular speed
+      const omega = 4.0; // controls how fast phase shifts with time (tweakable)
+
+      // iterate pixels (may be heavy but 720px DPR ok)
+      let idx = 0;
+      for(let y=0;y<h;y++){
+        for(let x=0;x<w;x++){
+          const dx = (x - cx);
+          const dy = (y - cy);
+          const r2 = (dx*dx + dy*dy);
+          // physical radius in meters (map pixels to meters via an arbitrary scale)
+          // choose scale so that typical ring radii are visible: compute pixel->meter scale s.t. R maps to ~ 150 px
+          const scale = Math.min(w,h) / (2 * Math.sqrt(R_m));
+          // However scale above may be unstable; instead, we compute phase using r (in pixels) converted to meters: r_m = r_px / magnification
+          // Let's choose magnification: pixels per meter = 2000 (empirical). But we can adaptively set magnification so rings fit.
+
+          // Simpler approach: compute phase = 2π * (r_px^2) * k - omega * phaseTime
+          // Find k such that rings spacing reasonable: choose k = k0 / (w*h) scaled by R and wl
+
+          // We'll compute phase coefficient 'kpix' from physical relation: r_px = r_m * px_per_m
+          const pxPerM = Math.max(500, (Math.min(w,h) / (2 * Math.sqrt(R_m*1e6)))); // heuristic
+          const r_m = Math.sqrt(r2) / pxPerM; // meters
+          const phase = 2 * Math.PI * (r_m * r_m) * factor - omega * phaseTime;
+          // intensity from cosine interference term (0..1)
+          const I = 0.5 * (1 + Math.cos(phase));
+
+          // apply a radial falloff for visibility
+          const r_px = Math.sqrt(r2);
+          const vignette = Math.exp(- (r_px*r_px) / ( (Math.min(w,h)*0.5)*(Math.min(w,h)*0.5) ));
+          const intensity = Math.pow(I, 0.9) * vignette;
+
+          // map to RGB
+          data[idx] = Math.min(255, Math.round(baseColor[0] * intensity)); // R
+          data[idx+1] = Math.min(255, Math.round(baseColor[1] * intensity)); // G
+          data[idx+2] = Math.min(255, Math.round(baseColor[2] * intensity)); // B
+          data[idx+3] = 255; // alpha
+          idx += 4;
+        }
+      }
+
+      ctx.putImageData(image, 0, 0);
+
+      if(!paused) requestAnimationFrame(render);
+    }
+
+    // initial start
+    requestAnimationFrame(render);
+
+    // controls
+    wlCtrl.addEventListener('input', ()=>{ wlTxt.textContent = wlCtrl.value; });
+    Rctrl.addEventListener('input', ()=>{ rTxt.textContent = Rctrl.value; });
+    speedCtrl.addEventListener('input', ()=>{ spdTxt.textContent = speedCtrl.value; });
+
+    pauseBtn.addEventListener('click', ()=>{
+      paused = !paused;
+      pauseBtn.textContent = paused ? 'Resume' : 'Pause';
+      if(!paused) requestAnimationFrame(render);
+    });
+
+    downloadBtn.addEventListener('click', ()=>{
+      // draw one frame then download
+      const url = canvas.toDataURL('image/png');
+      const a = document.createElement('a'); a.href = url; a.download = 'newtons_rings_animated.png'; a.click();
+    });
+
+    // small safety: keep canvas responsive
+    window.addEventListener('visibilitychange', ()=>{
+      if(document.hidden){ paused = true; pauseBtn.textContent = 'Resume'; }
+    });
+  </script>
+</body>
+</html>
